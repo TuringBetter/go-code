@@ -1,0 +1,11 @@
+# 主进程无法捕获子进程的panic
+## goroutine的隔离性
+1. 每个goroutine拥有独立的执行栈：每个goroutine都是一个独立的执行单元，有自己的调用栈和执行上下文。
+2. panic/recover的作用域限制：panic只会沿着当前goroutine的调用栈向上传播，而recover只能捕获同一goroutine中的panic。
+## panic/recover机制原理
+1. 当调用panic()时，Go运行时会创建一个_panic数据结构，并挂接到当前goroutine上。然后程序会沿着当前goroutine的调用栈逐层执行defer函数。
+2. recover函数的作用很简单：只是将当前goroutine的_panic状态标记为已恢复。这就是为什么它不能捕获其他goroutine的panic——因为它根本无法访问其他goroutine的_panic信息
+## recover无法捕获panic的情况
+1. recover不在defer中调用：recover只有在defer函数中调用才有效
+2. recover通过嵌套函数间接调用：recover必须在defer中直接调用，不能通过嵌套函数间接调用
+2. 不可恢复的运行时错误：如并发写入map、内存不足等会触发不可恢复的panic
