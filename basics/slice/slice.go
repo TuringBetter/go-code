@@ -2,7 +2,7 @@ package main
 
 import "fmt"
 
-func main() {
+func maintest() {
 	s := []int{1, 2, 3, 4, 5}
 
 	fmt.Println(len(s))
