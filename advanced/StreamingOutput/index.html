@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>流式输出Demo</title>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        button { padding: 10px 20px; margin: 10px; font-size: 16px; }
+        #output { border: 1px solid #ccc; padding: 20px; height: 300px; overflow-y: auto; background: #f9f9f9; }
+        .message { margin: 5px 0; padding: 5px; background: white; border-left: 3px solid #007cba; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Go 流式输出 Demo</h1>
+        <p>选择一种流式输出类型进行测试：</p>
+        
+        <button onclick="testSSE()">测试 SSE (Server-Sent Events)</button>
+        <button onclick="testTextStream()">测试文本流</button>
+        <button onclick="testJSONStream()">测试 JSON 流</button>
+        <button onclick="clearOutput()">清空输出</button>
+        
+        <h3>输出区域：</h3>
+        <div id="output"></div>
+    </div>
+
+    <script>
+        function clearOutput() {
+            document.getElementById('output').innerHTML = '';
+        }
+        
+        function addMessage(content) {
+            const output = document.getElementById('output');
+            const div = document.createElement('div');
+            div.className = 'message';
+            div.innerHTML = content;
+            output.appendChild(div);
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        function testSSE() {
+            clearOutput();
+            addMessage('开始 SSE 流式输出...');
+            
+            const eventSource = new EventSource('/stream/sse');
+            
+            eventSource.onmessage = function(event) {
+                addMessage('SSE 消息: ' + event.data);
+            };
+            
+            eventSource.onerror = function(event) {
+                addMessage('SSE 连接错误');
+                eventSource.close();
+            };
+            
+            // 10秒后关闭连接
+            setTimeout(() => {
+                eventSource.close();
+                addMessage('SSE 连接已关闭');
+            }, 10000);
+        }
+        
+        function testTextStream() {
+            clearOutput();
+            addMessage('开始文本流式输出...');
+            
+            fetch('/stream/text')
+                .then(response => {
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    
+                    function readStream() {
+                        return reader.read().then(({ done, value }) => {
+                            if (done) {
+                                addMessage('文本流结束');
+                                return;
+                            }
+                            
+                            const chunk = decoder.decode(value, { stream: true });
+                            addMessage('文本块: ' + chunk);
+                            
+                            return readStream();
+                        });
+                    }
+                    
+                    return readStream();
+                })
+                .catch(error => {
+                    addMessage('文本流错误: ' + error);
+                });
+        }
+        
+        function testJSONStream() {
+            clearOutput();
+            addMessage('开始 JSON 流式输出...');
+            
+            fetch('/stream/json')
+                .then(response => {
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    
+                    function readStream() {
+                        return reader.read().then(({ done, value }) => {
+                            if (done) {
+                                addMessage('JSON 流结束');
+                                return;
+                            }
+                            
+                            const chunk = decoder.decode(value, { stream: true });
+                            addMessage('JSON 块: ' + chunk);
+                            
+                            return readStream();
+                        });
+                    }
+                    
+                    return readStream();
+                })
+                .catch(error => {
+                    addMessage('JSON 流错误: ' + error);
+                });
+        }
+    </script>
+</body>
+</html>
