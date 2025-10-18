@@ -16,6 +16,11 @@ func main() {
 
 	fmt.Println("\n使用range遍历:")
 	// 使用range遍历 自动解码utf-8 每次迭代返回一个rune
+	// 'a' => 97
+	// '我' => 25105
+	// '世' => 29983
+	// '界' => 32593
+	// 由单引号包裹的是字符的码点值
 	for _, char := range str {
 		fmt.Printf("%c", char)
 	}
