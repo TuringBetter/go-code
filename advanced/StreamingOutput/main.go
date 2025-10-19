@@ -25,6 +25,7 @@ func main() {
 	http.HandleFunc("/stream/sse", sseHandler)
 	http.HandleFunc("/stream/text", textStreamHandler)
 	http.HandleFunc("/stream/json", jsonStreamHandler)
+	http.HandleFunc("/stream/pipeline", pipelineHandler) // 新增：通道解耦示例
 
 	// 启动服务器
 	fmt.Println("流式输出服务器启动在 http://localhost:8080")
@@ -33,6 +34,7 @@ func main() {
 	fmt.Println("  - http://localhost:8080/stream/sse (SSE流式输出)")
 	fmt.Println("  - http://localhost:8080/stream/text (文本流式输出)")
 	fmt.Println("  - http://localhost:8080/stream/json (JSON流式输出)")
+	fmt.Println("  - http://localhost:8080/stream/pipeline (通道解耦示例)")
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
@@ -185,3 +187,119 @@ func jsonStreamHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "\n]")
 	flusher.Flush()
 }
+
+// ============ 通道解耦：生产与传输分离示例 ============
+
+// generateWithPipeline 模拟大模型逐token生成
+// 💡 关键点：返回只读通道 (<-chan string)，调用者只能接收数据
+func generateWithPipeline(prompt string) <-chan string {
+	ch := make(chan string, 5) // 带缓冲的通道，生产者不会因为消费者慢而阻塞
+
+	// 在独立的 goroutine 中生成数据（生产者）
+	go func() {
+		defer close(ch) // 确保生成完成后关闭通道
+		log.Printf("[Pipeline-生产者] 开始生成，提示词: %s", prompt)
+
+		// 模拟大模型逐token生成（如 OpenAI/Claude streaming API）
+		tokens := []string{
+			"你好", "！", "我", "是", "AI", "助手", "。\n",
+			"根据", "你的", "提示", "「", prompt, "」", "，\n",
+			"我", "将", "逐步", "生成", "回答", "内容", "。\n",
+			"这", "展示", "了", "通道", "解耦", "的", "威力", "！",
+		}
+
+		for i, token := range tokens {
+			// 模拟大模型API的延迟（生成延迟）
+			time.Sleep(100 * time.Millisecond)
+
+			// 发送到通道
+			ch <- token
+			log.Printf("[Pipeline-生产者] ✓ 生成token %d/%d: %q", i+1, len(tokens), token)
+		}
+
+		log.Printf("[Pipeline-生产者] ✓ 生成完成，通道已关闭")
+	}()
+
+	return ch // 立即返回通道，不等待生成完成
+}
+
+// pipelineHandler 演示通道解耦的流式输出处理器
+func pipelineHandler(w http.ResponseWriter, r *http.Request) {
+	// 1. 设置响应头
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	// 2. 获取 Flusher 接口
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	// 3. 获取查询参数作为提示词
+	prompt := r.URL.Query().Get("prompt")
+	if prompt == "" {
+		prompt = "通道解耦示例"
+	}
+
+	ctx := r.Context()
+	log.Printf("[Pipeline-消费者] 客户端连接: %s, 提示词: %s", r.RemoteAddr, prompt)
+
+	// 4. 启动生产者（立即返回通道）
+	tokenCh := generateWithPipeline(prompt)
+
+	fmt.Fprintf(w, "=== 通道解耦流式输出示例 ===\n")
+	fmt.Fprintf(w, "提示词: %s\n", prompt)
+	fmt.Fprintf(w, "开始接收生成的token...\n\n")
+	flusher.Flush()
+
+	// 5. 消费者：从通道读取并传输（传输过程）
+	tokenCount := 0
+	for {
+		select {
+		case <-ctx.Done():
+			// 客户端断开连接
+			log.Printf("[Pipeline-消费者] ⚠️ 客户端断开连接（已接收 %d 个token）", tokenCount)
+			return
+
+		case token, ok := <-tokenCh:
+			if !ok {
+				// 通道已关闭，生产者完成
+				fmt.Fprintf(w, "\n\n=== 生成完成 ===\n")
+				fmt.Fprintf(w, "共接收到 %d 个token\n", tokenCount)
+				flusher.Flush()
+				log.Printf("[Pipeline-消费者] ✓ 传输完成，共发送 %d 个token", tokenCount)
+				return
+			}
+
+			// 发送token给客户端
+			tokenCount++
+			fmt.Fprint(w, token)
+			flusher.Flush()
+			log.Printf("[Pipeline-消费者] → 发送token %d: %q", tokenCount, token)
+
+			// 模拟网络传输延迟（可选）
+			// 注意：即使这里延迟，也不会阻塞生产者的生成
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+}
+
+// ============ 对比：无通道解耦的传统方式 ============
+// 
+// 传统方式的问题：
+// func traditionalHandler(w http.ResponseWriter, r *http.Request) {
+//     for i := 0; i < 10; i++ {
+//         token := generateToken()        // 生成（阻塞）
+//         fmt.Fprint(w, token)           // 传输（阻塞）
+//         flusher.Flush()
+//         // 问题：生成完一个才能传输一个，串行执行
+//     }
+// }
+//
+// 通道解耦的优势：
+// 1. 生产者（大模型生成）在独立 goroutine 中运行，不被传输阻塞
+// 2. 消费者（网络传输）在主 goroutine 中运行，不被生成阻塞
+// 3. 通过带缓冲的通道，允许生产者"提前"生成多个token
+// 4. 两者并行执行，总体响应更快
