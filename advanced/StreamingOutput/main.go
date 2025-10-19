@@ -59,12 +59,19 @@ func sseHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
 	// 3. 发送初始数据
 	fmt.Fprintf(w, "data: %s\n\n", "SSE连接已建立")
 	flusher.Flush()
 
 	// 4. 模拟数据流
 	for i := 1; i <= 10; i++ {
+		select {
+		case <-ctx.Done():
+			log.Printf("[SSE] ⚠️ 客户端断开连接（Context取消，在第 %d/10 条消息时）", i)
+			return
+		default:
+		}
 		message := Message{
 			ID:      i,
 			Content: fmt.Sprintf("这是第 %d 条SSE消息", i),
@@ -101,6 +108,7 @@ func textStreamHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
 	// 3. 模拟文本数据流
 	textChunks := []string{
 		"开始文本流式输出...\n",
@@ -114,7 +122,13 @@ func textStreamHandler(w http.ResponseWriter, r *http.Request) {
 		"文本流输出结束\n",
 	}
 
-	for _, chunk := range textChunks {
+	for i, chunk := range textChunks {
+		select {
+		case <-ctx.Done():
+			log.Printf("[Text] ⚠️ 客户端断开连接（Context取消，在第 %d/%d 块时）", i+1, len(textChunks))
+			return
+		default:
+		}
 		fmt.Fprint(w, chunk)
 		flusher.Flush()
 		time.Sleep(500 * time.Millisecond)
@@ -135,12 +149,19 @@ func jsonStreamHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
 	// 3. 开始JSON数组
 	fmt.Fprint(w, "[\n")
 	flusher.Flush()
 
 	// 4. 模拟JSON数据流
 	for i := 1; i <= 5; i++ {
+		select {
+		case <-ctx.Done():
+			log.Printf("[JSON] ⚠️ 客户端断开连接（Context取消，在第 %d/5 条消息时）", i)
+			return
+		default:
+		}
 		message := Message{
 			ID:      i,
 			Content: fmt.Sprintf("JSON流消息 %d", i),
